@@ -85,7 +85,42 @@ def organize_mentions(datafile, experiment):
     return mention_dict_per_tu, mention_dict_per_round
 
 
-def linguistic_analysis(characters):
+def participant_linguistic_analysis(experiment):
+    directory = '/Users/jaapkruijt/Documents/ALANI/SPOT/SPOT_pilotadata/SPOT-mentions'
+    filenames = [f for f in os.listdir(directory) if not f.startswith('.')]
+    character_mentions = {}
+    char_amount = 15 if experiment == 'AK' else 13
+    character_mean_sim = {'character': [], 'round': [], 'sim_score': []}
+    for i in ['1','2','3']:
+        character_mentions[i] = {}
+        for j in ['1','2','3','4','5','6']:
+            character_mentions[i][j] = []
+    for filename in filenames:
+        f = os.path.join(directory, filename)
+        data = prepare_tsv_datafile(f)
+        mentions_per_tu, mentions_per_round = organize_mentions(data, experiment)
+        for character, rounds in mentions_per_round.items():
+            if character not in ['1', '2', '3']:
+                continue
+            for game_round, mentions in rounds.items():
+                character_mentions[character][game_round].extend(mentions)
+    for character, rounds in character_mentions.items():
+        for game_round, mentions in rounds.items():
+            mention_embeddings = model.encode(mentions)
+            sim_scores = util.cos_sim(mention_embeddings, mention_embeddings)
+            mean = torch.mean(sim_scores)
+            character_mean_sim['character'].append(character)
+            character_mean_sim['round'].append(game_round)
+            character_mean_sim['sim_score'].append(float(mean))
+
+    dataframe = pd.DataFrame.from_dict(character_mean_sim)
+    return dataframe
+
+
+# def character_discourse_analysis()
+
+
+def character_linguistic_analysis(characters):
     nlp = spacy.load('nl_core_news_sm')
     character_lemma_counts = {}
     # character_desc_length = {}
@@ -107,9 +142,11 @@ def linguistic_analysis(characters):
                 for token in doc:
                     if token.pos_ != 'PUNCT':
                         lemma_count[token.lemma_] += 1
+            num_mentions = len(mentions)
             avg_desc_length = sum(desc_lengths)/len(desc_lengths)
             # character_desc_length[character][game_round] = avg_desc_length
             character_data[character][game_round]['desc_length'] = avg_desc_length
+            character_data[character][game_round]['num_mentions'] = num_mentions
             if game_rounds.get(str(int(game_round)-1)) is not None:
                 mentions_previous = game_rounds[str(int(game_round)-1)]
                 embeddings_current = model.encode(mentions, convert_to_tensor=True)
@@ -125,31 +162,36 @@ def linguistic_analysis(characters):
     return character_lemma_counts, character_data
 
 
-def combine_data(participant_number, experiment, character_data, combined_data):
+def combine_character_data(participant_number, experiment, character_data, combined_data):
     for character, rounds in character_data.items():
         for round, values in rounds.items():
             if not values:
                 continue
             else:
-                combined_data['experiment'].append(experiment)
+                if experiment == 'EN':
+                    combined_data['experiment'].append('1')
+                    combined_data['character'].append(f'1.{character}')
+                elif experiment == 'AK':
+                    combined_data['experiment'].append('2')
+                    combined_data['character'].append(f'2.{character}')
                 combined_data['participant'].append(participant_number)
-                combined_data['character'].append(character)
                 combined_data['round'].append(round)
                 if character in ['1','2','3']:
                     combined_data['circle'].append('inner')
                 else:
                     combined_data['circle'].append('outer')
                 combined_data['utt_len'].append(values['desc_length'])
+                combined_data['num_mentions'].append(values['num_mentions'])
                 if 'sim_score' in values:
                     combined_data['sim_score'].append(values['sim_score'])
                 else:
                     combined_data['sim_score'].append(None)
 
 
-def main():
+def combine_experiments():
     directory = '/Users/jaapkruijt/Documents/ALANI/SPOT/SPOT_pilotadata/SPOT-mentions'
     data = {'experiment': [], 'participant': [], 'character': [], 'round': [], 'circle': [], 'utt_len': [],
-                    'sim_score': []}
+                    'sim_score': [], 'num_mentions': []}
     filenames = [f for f in os.listdir(directory) if not f.startswith('.')]
     for filename in filenames:
         f = os.path.join(directory, filename)
@@ -157,21 +199,22 @@ def main():
         participant = os.path.splitext(filename)[0].split('_')[1]
         mentions = prepare_tsv_datafile(f)
         mentions_per_tu, mentions_per_round = organize_mentions(mentions, experiment)
-        word_counts, character_data = linguistic_analysis(mentions_per_round)
-        combine_data(participant, experiment, character_data, data)
+        word_counts, character_data = character_linguistic_analysis(mentions_per_round)
+        combine_character_data(participant, experiment, character_data, data)
 
     dataframe = pd.DataFrame.from_dict(data)
-    sns.set_theme()
-    sns.catplot(dataframe, kind='bar', x='round', y='sim_score', hue='circle', col='experiment')
-    plt.show()
     return dataframe
 
 
-
-
-
 if __name__ == "__main__":
-    main()
+    # frame = combine_experiments()
+    # per_tu, per_round = organize_mentions()
+    # frame.to_pickle('data.pkl')
+    en_mean_sims = participant_linguistic_analysis('EN')
+    ak_mean_sims = participant_linguistic_analysis('AK')
+    print(ak_mean_sims)
+    en_mean_sims.to_pickle('en_sim.pkl')
+    ak_mean_sims.to_pickle('ak_sim.pkl')
     # for char, g_round in per_tu.items():
     #     print(f'CHARACTER: {char}')
     #     for r, unit in g_round.items():
